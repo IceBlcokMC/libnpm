@@ -93,45 +93,46 @@ int main(int argc, char* argv[]) {
     auto               context = setup->context();
     v8::Context::Scope context_scope(context);
 
-    fs::path npm_cli = npm_dir / "lib" / "cli.js";
-    if (!fs::exists(npm_cli)) {
-        fmt::print("Error: {} does not exist\n", npm_cli.string());
-        return 1;
-    }
+    // clang-format off
+    string compiler = R"(
+        try {
+            const path = require("path");
 
-    std::ifstream ifs(npm_cli);
-    if (!ifs.is_open()) {
-        fmt::print("Error: Failed to open {}\n", npm_cli.string());
-        return 1;
-    }
+            const npm_dir = path.join(")"+npm_dir.string()+R"(");
+            const npm_dir_node_modules = path.join(npm_dir, "node_modules");
 
-    // 读取 npm-cli.js 文件内容
-    string npm_cli_content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-    ifs.close();
+            const Module = require('module').Module;
+            Module._resolveLookupPaths = function (request, parent) {
+                result = [parent.path, npm_dir, npm_dir_node_modules];
+                return result;
+            };
+            globalThis.require = Module.createRequire(npm_dir);
 
-    // 执行 npm-cli.js
-    v8::Local<v8::String> source =
-        v8::String::NewFromUtf8(isolate, npm_cli_content.c_str(), v8::NewStringType::kNormal).ToLocalChecked();
+            require("vm").runInThisContext(` require('lib/cli.js')(process); `, "libnpm.exe");
+        } catch (e) {
+            console.error(e);
+        }
+    )";
+    // clang-format on
 
-    // 编译源码
-    v8::Local<v8::Script> script;
-    if (!v8::Script::Compile(setup->context(), source).ToLocal(&script)) {
-        fmt::print("Error: Failed to compile npm-cli.js\n");
-        return 1;
-    }
-
-    // 运行脚本
-    v8::Local<v8::Value> result;
-    if (!script->Run(setup->context()).ToLocal(&result)) {
-        fmt::print("Error: Failed to run npm-cli.js\n");
+    int code = 0;
+    try {
+        node::SetProcessExitHandler(env, [&](node::Environment* env_, int exit_code) { node::Stop(env); });
+        v8::MaybeLocal<v8::Value> loadValue = node::LoadEnvironment(env, compiler.c_str());
+        if (loadValue.IsEmpty()) {
+            std::cerr << "Failed to load environment\n";
+            return 1;
+        }
+        code = node::SpinEventLoop(env).FromMaybe(1);
+    } catch (...) {
         return 1;
     }
 
     node::SpinEventLoop(env).FromMaybe(false); // 运行事件循环
 
     // 清理资源
-    setup.reset();
+    node::Stop(env);
     v8::V8::Dispose();
     v8::V8::DisposePlatform();
-    return 0;
+    return code;
 }
