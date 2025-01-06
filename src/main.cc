@@ -101,16 +101,24 @@ int main(int argc, char* argv[]) {
 
             const npm_dir = path.join(")"+npm_dir.string()+R"(");
             const npm_cli_file = path.join(npm_dir, "bin", "npm-cli.js");
-            const npm_dir_node_modules = path.join(npm_dir, "node_modules");
+            const npm_node_modules = path.join(npm_dir, "node_modules");
 
             const Module = require('module').Module;
+            const OriginalResolveLookupPaths = Module._resolveLookupPaths;
             Module._resolveLookupPaths = function (request, parent) {
-                result = [parent.path, npm_dir, npm_dir_node_modules];
-                return result;
+                const paths = OriginalResolveLookupPaths(request, parent);
+                if (Array.isArray(paths)) {
+                    return [
+                        ...paths,
+                        npm_dir,
+                        npm_node_modules
+                    ];
+                }
+                console.log("paths:", paths);
+                return paths;
             };
             globalThis.require = Module.createRequire(npm_dir);
 
-            // 修复 process.argv 
             process.argv = [process.argv[0], npm_cli_file, ...process.argv.slice(1)];
 
             const code = `
