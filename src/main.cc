@@ -1,4 +1,5 @@
 
+#include "fmt/core.h"
 #include "fmt/format.h"
 #include <filesystem>
 #include <fstream>
@@ -99,6 +100,7 @@ int main(int argc, char* argv[]) {
             const path = require("path");
 
             const npm_dir = path.join(")"+npm_dir.string()+R"(");
+            const npm_cli_file = path.join(npm_dir, "bin", "npm-cli.js");
             const npm_dir_node_modules = path.join(npm_dir, "node_modules");
 
             const Module = require('module').Module;
@@ -108,7 +110,14 @@ int main(int argc, char* argv[]) {
             };
             globalThis.require = Module.createRequire(npm_dir);
 
-            require("vm").runInThisContext(` require('lib/cli.js')(process); `, "libnpm.exe");
+            // 修复 process.argv 
+            process.argv = [process.argv[0], npm_cli_file, ...process.argv.slice(1)];
+
+            const code = `
+                console.log("args:", process.argv);
+                require('lib/cli.js')(process); 
+            `;
+            require("vm").runInThisContext(code, "libnpm.exe");
         } catch (e) {
             console.error(e);
         }
